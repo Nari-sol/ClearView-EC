@@ -1,0 +1,29 @@
+name: Daily Price Scraper
+
+on:
+  schedule:
+    # 日本時間の毎朝9時（UTCの0時）に実行
+    - cron: '0 0 1-31 1-12 0-6'
+  workflow_dispatch: # 手動でいつでも実行できるボタン
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: リポジトリを読み込む
+      uses: actions/checkout@v4
+
+    - name: Pythonの準備
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 必要なライブラリのインストール
+      run: |
+        pip install requests beautifulsoup4 pandas
+
+    - name: スクレイピングボットの出撃
+      env:
+        GAS_WEBAPP_URL: ${{ secrets.GAS_WEBAPP_URL }}
+      run: python daily_bot.py
