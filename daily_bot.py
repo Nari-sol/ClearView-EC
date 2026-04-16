@@ -11,8 +11,7 @@ import json
 # --- Constants ---
 # 監視対象ショップ：["オートパーツサンライズ", "自動車パーツの宝箱 SOL 2号店", "MCLオートパーツ", "H.S.P"]
 TARGET_SHOPS = ["オートパーツサンライズ", "自動車パーツの宝箱 SOL 2号店", "MCLオートパーツ", "H.S.P"]
-# 検索キーワード：["BMW E84 X1 18i ラジエーター"]
-KEYWORDS = ["BMW E84 X1 18i ラジエーター"]
+# 検索ターゲット（カテゴリ・品番）は実行時に GAS から取得します
 SECRET_TOKEN = "COMMANDER_SECRET_2026"
 GAS_WEBAPP_URL = os.environ.get("GAS_WEBAPP_URL")
 
@@ -151,10 +150,34 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
 def main():
     print(f"=== Daily Bot Execution Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     
+    if not GAS_WEBAPP_URL:
+        print("Error: GAS_WEBAPP_URL is not set.")
+        return
+
+    # 1. GASから検索ターゲットを取得 (GET)
+    try:
+        print(f"[Get] Fetching search targets from {GAS_WEBAPP_URL}...")
+        response = requests.get(GAS_WEBAPP_URL, timeout=15)
+        response.raise_for_status()
+        search_targets = response.json()
+        if not isinstance(search_targets, list):
+            print(f"Error: Unexpected response format (expected list, got {type(search_targets)})")
+            return
+        print(f"[Done] Fetched {len(search_targets)} targets.")
+    except Exception as e:
+        print(f"Failed to fetch search targets from GAS: {e}")
+        return
+
     all_data_for_gas = []
     
-    for kw in KEYWORDS:
-        print(f"\n> Keywords: {kw}")
+    for target in search_targets:
+        category = target.get("category", "不明")
+        part_number = target.get("part_number")
+        if not part_number:
+            print("  [Skip] Empty part_number found.")
+            continue
+            
+        print(f"\n> Target: {part_number} ({category})")
         found_data = {}
         max_retries = 3
         
@@ -163,26 +186,28 @@ def main():
                 print(f"    - Retry {attempt}/{max_retries}...")
                 time.sleep(2.0 + random.random())
 
-            current_results = fetch_benchmark_data(kw, TARGET_SHOPS, max_pages=3)
+            # 品番をキーワードとして使用
+            current_results = fetch_benchmark_data(part_number, TARGET_SHOPS, max_pages=3)
             
             for shop, data in current_results.items():
                 if shop not in found_data or (found_data[shop]["status"] != "出品中" and data["status"] == "出品中"):
                     found_data[shop] = data
             
-            # Check if all shops found
+            # すべてのショップが見つかったか確認
             complete_success = all(ts in found_data and found_data[ts].get("status") == "出品中" for ts in TARGET_SHOPS)
             if complete_success:
                 print("    - Search complete.")
                 break
         
-        # Aggregate data
+        # データの集約
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for shop in TARGET_SHOPS:
             if shop in found_data:
                 d = found_data[shop]
                 all_data_for_gas.append({
                     "timestamp": timestamp,
-                    "keyword": kw,
+                    "category": category,
+                    "part_number": part_number,
                     "shop_name": shop,
                     "price": d["price"],
                     "shipping": d["shipping"],
@@ -193,7 +218,8 @@ def main():
             else:
                 all_data_for_gas.append({
                     "timestamp": timestamp,
-                    "keyword": kw,
+                    "category": category,
+                    "part_number": part_number,
                     "shop_name": shop,
                     "price": 0,
                     "shipping": 0,
@@ -202,13 +228,13 @@ def main():
                     "item_name": "（見つかりませんでした）"
                 })
 
-    # Transmission to GAS
+    # GASへのデータ送信 (POST)
     payload = {
         "token": SECRET_TOKEN,
         "data": all_data_for_gas
     }
     
-    if GAS_WEBAPP_URL:
+    if all_data_for_gas:
         try:
             print(f"\n[Post] Sending {len(all_data_for_gas)} records to GAS...")
             response = requests.post(GAS_WEBAPP_URL, json=payload, timeout=30)
@@ -217,8 +243,7 @@ def main():
         except Exception as e:
             print(f"[Failed] GAS Transmission Error: {e}")
     else:
-        print("\n[Skip] GAS_WEBAPP_URL is not set. Payload preview:")
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print("\n[Skip] No data to send.")
 
     print(f"\n=== Daily Bot Execution Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
 
