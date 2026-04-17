@@ -8,10 +8,7 @@ import os
 import unicodedata
 import json
 
-# --- Constants ---
-# 監視対象ショップ：["オートパーツサンライズ", "自動車パーツの宝箱 SOL 2号店", "MCLオートパーツ", "H.S.P"]
-TARGET_SHOPS = ["オートパーツサンライズ", "自動車パーツの宝箱 SOL 2号店", "MCLオートパーツ", "H.S.P"]
-# 検索ターゲット（カテゴリ・品番）は実行時に GAS から取得します
+# 検索ターゲット（カテゴリ・品番）および監視対象ショップは実行時に GAS から取得します
 SECRET_TOKEN = "COMMANDER_SECRET_2026"
 GAS_WEBAPP_URL = os.environ.get("GAS_WEBAPP_URL")
 
@@ -154,18 +151,27 @@ def main():
         print("Error: GAS_WEBAPP_URL is not set.")
         return
 
-    # 1. GASから検索ターゲットを取得 (GET)
+    # 1. GASから検索ターゲットとショップリストを取得 (GET)
     try:
-        print(f"[Get] Fetching search targets from {GAS_WEBAPP_URL}...")
+        print(f"[Get] Fetching search data from {GAS_WEBAPP_URL}...")
         response = requests.get(GAS_WEBAPP_URL, timeout=15)
         response.raise_for_status()
-        search_targets = response.json()
+        data = response.json()
+        
+        search_targets = data.get("targets", [])
+        target_shops = data.get("shops", [])
+        
         if not isinstance(search_targets, list):
-            print(f"Error: Unexpected response format (expected list, got {type(search_targets)})")
+            print(f"Error: Unexpected targets format (expected list)")
             return
-        print(f"[Done] Fetched {len(search_targets)} targets.")
+            
+        if not target_shops:
+            print("Error: Target shops list is empty. Termination for safety.")
+            return
+
+        print(f"[Done] Fetched {len(search_targets)} targets and {len(target_shops)} shops.")
     except Exception as e:
-        print(f"Failed to fetch search targets from GAS: {e}")
+        print(f"Failed to fetch data from GAS: {e}")
         return
 
     all_data_for_gas = []
@@ -187,21 +193,21 @@ def main():
                 time.sleep(2.0 + random.random())
 
             # 品番をキーワードとして使用
-            current_results = fetch_benchmark_data(part_number, TARGET_SHOPS, max_pages=3)
+            current_results = fetch_benchmark_data(part_number, target_shops, max_pages=3)
             
             for shop, data in current_results.items():
                 if shop not in found_data or (found_data[shop]["status"] != "出品中" and data["status"] == "出品中"):
                     found_data[shop] = data
             
-            # すべてのショップが見つかったか確認
-            complete_success = all(ts in found_data and found_data[ts].get("status") == "出品中" for ts in TARGET_SHOPS)
-            if complete_success:
-                print("    - Search complete.")
-                break
-        
-        # データの集約
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for shop in TARGET_SHOPS:
+        # すべてのショップが見つかったか確認
+        complete_success = all(ts in found_data and found_data[ts].get("status") == "出品中" for ts in target_shops)
+        if complete_success:
+            print("    - Search complete.")
+            break
+    
+    # データの集約
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for shop in target_shops:
             if shop in found_data:
                 d = found_data[shop]
                 all_data_for_gas.append({
