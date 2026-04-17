@@ -188,7 +188,8 @@ def fetch_product_extra_info(url, headers):
         
         # 診断ログ出力
         print(f"      [Detail Status: {response.status_code}]")
-        print(f"      [Detail Snippet] {response.text[:200].replace('\\n', ' ')}...")
+        snippet = response.text[:200].replace('\n', ' ')
+        print(f"      [Detail Snippet] {snippet}...")
         save_debug_html(response.text) # デバッグ用に最新のページを保存
 
         response.raise_for_status()
