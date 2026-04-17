@@ -199,15 +199,15 @@ def main():
                 if shop not in found_data or (found_data[shop]["status"] != "出品中" and data["status"] == "出品中"):
                     found_data[shop] = data
             
-        # すべてのショップが見つかったか確認
-        complete_success = all(ts in found_data and found_data[ts].get("status") == "出品中" for ts in target_shops)
-        if complete_success:
-            print("    - Search complete.")
-            break
+            # すべてのショップが見つかったか確認
+            complete_success = all(ts in found_data and found_data[ts].get("status") == "出品中" for ts in target_shops)
+            if complete_success:
+                print("    - Search complete.")
+                break
     
-    # データの集約
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for shop in target_shops:
+        # データの集約
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for shop in target_shops:
             if shop in found_data:
                 d = found_data[shop]
                 all_data_for_gas.append({
