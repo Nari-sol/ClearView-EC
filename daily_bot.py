@@ -124,15 +124,20 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
                     
                     total_price = price + shipping
                     
+                    # --- 追加データの取得（詳細ページ巡回） ---
+                    reviews, ranking = fetch_product_extra_info(url_path, headers)
+                    
                     results[ts] = {
                         "item_name": name,
                         "price": price,
                         "shipping": shipping,
                         "total_price": total_price,
                         "url": url_path,
+                        "reviews": reviews,
+                        "ranking": ranking,
                         "status": "出品中" if price > 0 else "取得エラー（要確認）"
                     }
-                    print(f"      [Hit] {ts}: ¥{total_price} ({name[:20]}...)")
+                    print(f"      [Hit] {ts}: ¥{total_price} | レビュー:{reviews}件 | 順位:{ranking}位")
                     break 
             
             if page < max_pages:
@@ -143,6 +148,50 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
             break
             
     return results
+
+def fetch_product_extra_info(url, headers):
+    """
+    商品個別ページからレビュー件数とランキングを取得する
+    """
+    reviews = 0
+    ranking = 0
+    
+    if not url or url == "#":
+        return reviews, ranking
+        
+    try:
+        # サーバー負荷軽減のためわずかに待機
+        time.sleep(random.uniform(0.5, 1.0))
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 1. レビュー件数の取得
+        # セレクター: hrefに"#anchor-reviewDetail"を含むリンク
+        review_elem = soup.select_one('a[href*="#anchor-reviewDetail"]')
+        if review_elem:
+            review_text = review_elem.get_text(strip=True)
+            match = re.search(r'(\d+)', review_text.replace(',', ''))
+            if match:
+                reviews = int(match.group(1))
+        
+        # 2. ランキング順位の取得
+        # セレクター: hrefに"categoryranking"を含むリンクを基準に親要素を探索
+        ranking_link = soup.select_one('a[href*="categoryranking"]')
+        if ranking_link:
+            # 親要素などの周辺テキストから「ランキング X 位」を探す
+            p_elem = ranking_link.find_parent()
+            if p_elem:
+                parent_text = p_elem.get_text(strip=True)
+                # 「ランキング 1 位」や「1位」などを抽出
+                match = re.search(r'(?:ランキング)?\s*(\d+)\s*位', parent_text.replace(',', ''))
+                if match:
+                    ranking = int(match.group(1))
+                
+    except Exception as e:
+        print(f"      [Detail Error] {url[:30]}...: {e}")
+        
+    return reviews, ranking
 
 def main():
     print(f"=== Daily Bot Execution Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
@@ -219,7 +268,9 @@ def main():
                     "shipping": d["shipping"],
                     "total_price": d["total_price"],
                     "url": d["url"],
-                    "item_name": d["item_name"]
+                    "item_name": d["item_name"],
+                    "reviews": d.get("reviews", 0),
+                    "ranking": d.get("ranking", 0)
                 })
             else:
                 all_data_for_gas.append({
@@ -231,7 +282,9 @@ def main():
                     "shipping": 0,
                     "total_price": 0,
                     "url": "",
-                    "item_name": "（見つかりませんでした）"
+                    "item_name": "（見つかりませんでした）",
+                    "reviews": 0,
+                    "ranking": 0
                 })
 
     # GASへのデータ送信 (POST)
