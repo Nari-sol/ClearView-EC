@@ -151,7 +151,7 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
 
 def fetch_product_extra_info(url, headers):
     """
-    商品個別ページからレビュー件数とランキングを取得する
+    商品個別ページからレビュー件数とランキングを堅牢なロジックで取得する
     """
     reviews = 0
     ranking = 0
@@ -161,35 +161,91 @@ def fetch_product_extra_info(url, headers):
         
     try:
         # サーバー負荷軽減のためわずかに待機
-        time.sleep(random.uniform(0.5, 1.0))
+        time.sleep(random.uniform(0.5, 1.2))
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. レビュー件数の取得
-        # セレクター: hrefに"#anchor-reviewDetail"を含むリンク
-        review_elem = soup.select_one('a[href*="#anchor-reviewDetail"]')
-        if review_elem:
-            review_text = review_elem.get_text(strip=True)
-            match = re.search(r'(\d+)', review_text.replace(',', ''))
-            if match:
-                reviews = int(match.group(1))
-        
-        # 2. ランキング順位の取得
-        # セレクター: hrefに"categoryranking"を含むリンクを基準に親要素を探索
-        ranking_link = soup.select_one('a[href*="categoryranking"]')
-        if ranking_link:
-            # 親要素などの周辺テキストから「ランキング X 位」を探す
-            p_elem = ranking_link.find_parent()
-            if p_elem:
-                parent_text = p_elem.get_text(strip=True)
+        # 診断ログ: ページタイトルの出力
+        page_title = soup.title.text.strip() if soup.title else "No Title"
+        print(f"      [Detail] Page: {page_title[:40]}...")
+
+        # --- 1. JSON-LD (構造化データ) からの抽出 (最優先) ---
+        try:
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.string)
+                    # Product または AggregateRating 構造を探す
+                    if isinstance(data, dict):
+                        # パターンA: AggregateRating が直接入っている場合
+                        if data.get('@type') == 'AggregateRating' and 'reviewCount' in data:
+                            reviews = int(data['reviewCount'])
+                            break
+                        # パターンB: Product の中に aggregateRating がある場合
+                        agg = data.get('aggregateRating')
+                        if agg and 'reviewCount' in agg:
+                            reviews = int(agg['reviewCount'])
+                            break
+                except: continue
+            if reviews > 0:
+                print(f"      [Debug] ReviewCount found via JSON-LD: {reviews}")
+        except Exception as e:
+            print(f"      [Debug] JSON-LD parse error: {e}")
+
+        # --- 2. レビュー件数の取得 (HTMLフォールバック) ---
+        if reviews == 0:
+            review_selectors = [
+                'a[href*="#anchor-reviewDetail"]',
+                '.elReviewCount',
+                '.RatingReview__count',
+                '.ProductRate__reviewCount',
+                'span[itemprop="reviewCount"]'
+            ]
+            for sel in review_selectors:
+                elem = soup.select_one(sel)
+                if elem:
+                    text = elem.get_text(strip=True)
+                    match = re.search(r'(\d+)', text.replace(',', ''))
+                    if match:
+                        reviews = int(match.group(1))
+                        print(f"      [Debug] ReviewCount found via HTML ({sel}): {reviews}")
+                        break
+
+        # --- 3. ランキング順位の取得 (HTMLフォールバック) ---
+        ranking_selectors = [
+            'a[href*="categoryranking"]',
+            '.elRanking',
+            '.RankingLink',
+            '.ProductRanking__rank',
+            '[data-ranking]'
+        ]
+        for sel in ranking_selectors:
+            elem = soup.select_one(sel)
+            if elem:
+                # リンクの場合は親要素のテキストも確認
+                search_text = elem.get_text(strip=True)
+                if 'categoryranking' in sel:
+                    parent = elem.find_parent()
+                    if parent: search_text = parent.get_text(strip=True)
+                
                 # 「ランキング 1 位」や「1位」などを抽出
-                match = re.search(r'(?:ランキング)?\s*(\d+)\s*位', parent_text.replace(',', ''))
+                match = re.search(r'(?:ランキング)?\s*(\d+)\s*位', search_text.replace(',', ''))
+                if not match:
+                    # 数値のみのケースも想定
+                    match = re.search(r'(\d+)', search_text.replace(',', ''))
+                
                 if match:
                     ranking = int(match.group(1))
+                    print(f"      [Debug] Ranking found via HTML ({sel}): {ranking}")
+                    break
+
+        # 最終チェックログ
+        if reviews == 0: print(f"      [Check] ReviewCount not found. URL: {url}")
+        if ranking == 0: print(f"      [Check] Ranking not found. URL: {url}")
                 
     except Exception as e:
-        print(f"      [Detail Error] {url[:30]}...: {e}")
+        print(f"      [Detail Error] {url}: {e}")
         
     return reviews, ranking
 
