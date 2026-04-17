@@ -17,6 +17,15 @@ def normalize_text(text):
     if not text: return ""
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', text)).lower()
 
+def save_debug_html(html_content, filename="debug_page.html"):
+    """診断用にHTMLをローカルファイルに保存する"""
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"      [Diagnostic] HTML saved to {filename}")
+    except Exception as e:
+        print(f"      [Diagnostic] Failed to save HTML: {e}")
+
 def fetch_benchmark_data(keyword, target_shops, max_pages=3):
     """
     Yahoo!ショッピングを複数ページ巡回し、指定したベンチマーク店舗の出品状況を取得する
@@ -24,9 +33,18 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
     results = {} 
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Referer": "https://shopping.yahoo.co.jp/"
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://shopping.yahoo.co.jp/",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1"
     }
 
     url = "https://shopping.yahoo.co.jp/search"
@@ -39,6 +57,10 @@ def fetch_benchmark_data(keyword, target_shops, max_pages=3):
         try:
             print(f"    - Scraping Page {page}...")
             response = requests.get(url, params=params, headers=headers, timeout=15)
+            print(f"    - [Status: {response.status_code}]")
+            if response.status_code != 200:
+                print(f"    - [Warning] Response snippet: {response.text[:200]}...")
+            
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -163,6 +185,12 @@ def fetch_product_extra_info(url, headers):
         # サーバー負荷軽減のためわずかに待機
         time.sleep(random.uniform(0.5, 1.2))
         response = requests.get(url, headers=headers, timeout=10)
+        
+        # 診断ログ出力
+        print(f"      [Detail Status: {response.status_code}]")
+        print(f"      [Detail Snippet] {response.text[:200].replace('\\n', ' ')}...")
+        save_debug_html(response.text) # デバッグ用に最新のページを保存
+
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
